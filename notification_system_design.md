@@ -252,3 +252,70 @@ We can route all "read" queries (fetching notifications) to Read Replicas, while
 
 ### Recommended Approach
 A combination of **Strategy 1 (Caching)** and **Strategy 2 (WebSockets)** is the industry standard for this scenario. We use Redis to cache the notification payload for ultra-fast initial loads upon login, and WebSockets to push new live notifications so clients don't need to repeatedly hit the backend to check for updates.
+
+# Stage 5
+
+### Shortcomings of the proposed implementation
+1. **Synchronous & Blocking:** The loop runs synchronously. If `send_email` takes just 200ms, notifying 50,000 students will take over 2.5 hours. This will block the main thread, timeout the HR's HTTP request, and degrade server performance.
+2. **Lack of Fault Tolerance & Retries:** If `send_email` fails midway (e.g., for the 200 students), the loop might crash or skip them. There is no mechanism to track which students failed and retry them without re-sending to those who already received it.
+3. **Tight Coupling & Partial Failures:** The three operations (`send_email`, `save_to_db`, `push_to_app`) are tightly coupled. If `send_email` throws an error, the DB insert and App Push are completely skipped for that user, leading to massive data inconsistency.
+4. **Database & API Overload:** Hitting the DB and Email API 50,000 times sequentially will exhaust connection pools and likely trigger aggressive rate limits from the third-party Email provider (like AWS SES or SendGrid).
+
+### "Logs indicate that the 'send_email' call failed for 200 students midway. What now?"
+In the current synchronous architecture, if a failure throws an exception, the loop terminates immediately. This means all subsequent students in the array receive *nothing*. If the exception was swallowed (caught but ignored), those 200 students are permanently missed because there is no state tracking or queue to retry the failed deliveries. Manual intervention and database querying would be required to figure out who didn't get the email.
+
+### Should saving to DB and sending the email happen together? Why or why not?
+**No, they should NOT happen together synchronously.**
+*   **Why not:** Database inserts are fast, while sending emails via third-party APIs over the internet is inherently slow and unpredictable. Coupling them forces the fast local database operation to wait for the slow external network operation.
+*   **How it should be:** They should be decoupled. The system should write to the database first to ensure the notification is permanently stored, and then *asynchronously* trigger the email and app push processes.
+
+### Redesigning for Reliability and Speed
+To make this reliable, scalable, and fast, we must adopt an **Event-Driven, Asynchronous Message Queue Architecture**.
+
+1. **Batch DB Inserts:** Insert the notification for all 50,000 students into the DB using a bulk/batch insert operation rather than 50,000 individual `INSERT` statements.
+2. **Message Queues:** Publish a message to a queue (e.g., RabbitMQ, Apache Kafka, or AWS SQS) for each student.
+3. **Background Workers:** Deploy multiple concurrent background consumer services that listen to the queues and independently process the emails and pushes at their own optimal speed. 
+4. **Retry Mechanism:** If an email fails for a student, the worker simply puts that specific message back in the queue to be retried automatically with exponential backoff.
+
+### Revised Pseudocode
+
+```python
+# 1. API endpoint called by HR
+function notify_all(student_ids: array, message: string):
+    # Fast, bulk DB insert (e.g., chunked into arrays of 5000)
+    batch_save_to_db(student_ids, message)
+    
+    # Publish events to the Message Queue asynchronously
+    # This returns immediately, so the HR gets a fast "Success" response
+    for student_id in student_ids:
+        MessageQueue.publish("notification_exchange", {
+            "type": "email",
+            "student_id": student_id,
+            "message": message
+        })
+        MessageQueue.publish("notification_exchange", {
+            "type": "app_push",
+            "student_id": student_id,
+            "message": message
+        })
+    
+    return "Notifications queued and are processing in the background"
+
+# 2. Independent Background Worker for Emails (Scalable horizontally)
+function consume_email_queue(event):
+    try:
+        send_email(event.student_id, event.message)
+    except TransientError:
+        # Puts it back in queue to try again later (e.g., API rate limit hit)
+        MessageQueue.retry_with_backoff(event)
+    except PermanentError:
+        # Move to Dead Letter Queue for manual inspection (e.g., invalid email address)
+        MessageQueue.send_to_dlq(event)
+
+# 3. Independent Background Worker for App Pushes
+function consume_push_queue(event):
+    try:
+        push_to_app(event.student_id, event.message) # Using WebSockets designed in Stage 1
+    except Exception:
+        MessageQueue.retry_with_backoff(event)
+```
