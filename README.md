@@ -192,24 +192,35 @@ WHERE studentID = 1042 AND isRead = false
 ORDER BY createdAt DESC;
 ```
 
+### Is this query accurate?
+Yes, the query is logically accurate for its intended purpose. It correctly targets the unread (`isRead = false`) notifications for a specific student (`studentID = 1042`) and sorts them so the newest ones appear first (`ORDER BY createdAt DESC`). However, `SELECT *` is generally considered a bad practice in production as it pulls down all columns (including large string payloads) which increases network bandwidth and memory overhead.
+
 ### Why is it slow?
-With 5,000,000 records, the database engine is likely performing a **Sequential Scan** (or full table scan) because it lacks an efficient index that covers all the conditions in the `WHERE` clause and the `ORDER BY` clause. Even if there is a basic index on `studentID`, if the database has to sort a large number of rows by `createdAt` in memory (a "filesort"), it will consume significant CPU and memory, increasing latency. 
+With 5,000,000 records, if the database lacks an appropriate index covering `studentID`, `isRead`, and `createdAt` together, it will perform a **Sequential Scan** (full table scan) followed by an in-memory "filesort" to order the results by `createdAt`. Scanning millions of rows and sorting them in memory consumes massive CPU and disk I/O, causing severe latency.
 
-Furthermore, checking `isRead = false` means scanning through lots of records that might already be read.
-
-### The Solution
-To optimize this, we need to create a **Composite Index** that perfectly aligns with the query's filtering and sorting requirements. Furthermore, since we are only interested in unread notifications, we can optimize the index size and speed by making it a **Partial Index**.
-
-**Optimized Index Creation:**
+### What would you change and what would be the likely computation cost?
+I would add a **Partial Composite Index**:
 ```sql
 CREATE INDEX idx_student_unread_recent 
 ON notifications (studentID, createdAt DESC) 
 WHERE isRead = false;
 ```
+**Likely Computation Cost:**
+- **Without Index:** Time complexity is **O(N log N)** where N is the total number of rows in the table (due to full scan + sort). Computation cost is exceptionally high.
+- **With Index:** Time complexity drops to **O(log M + K)** where M is the number of unread notifications in the index, and K is the limit of results returned. The database performs an **Index Scan** directly on the pre-sorted B-Tree. The cost drops drastically, providing near-instantaneous responses.
 
-### How this solves the problem:
-1. **Filtering:** The index only stores rows where `isRead = false`, dramatically reducing the size of the index structure. The engine immediately narrows down to the unread rows without scanning read ones.
-2. **Targeting:** It uses `studentID` as the first key, instantly finding the specific student's records in the B-Tree.
-3. **Sorting:** It includes `createdAt DESC` as the second key. Because the index is already sorted in descending order by creation date, the database can fetch the results sequentially without needing to perform an expensive in-memory sort operation.
+### Adding indexes on every column to be safe: Is this advice effective?
+**No, this is terrible advice and highly ineffective.** 
+**Why/Why not?** 
+1. **Write Penalty:** Every time a new notification is inserted or updated (e.g., marked as read), *every single index* must be synchronously updated. This will drastically slow down write operations, which is catastrophic for a high-throughput notification system.
+2. **Storage Overhead:** Indexes consume significant disk space (RAM and Storage). Indexing every column could double or triple the database size unnecessarily.
+3. **Optimizer Confusion:** Too many single-column indexes can confuse the database query optimizer, sometimes causing it to pick sub-optimal execution plans instead of using a proper composite index.
 
-This optimization changes the query execution plan from an expensive sequential scan / filesort into a very fast **Index Only Scan** or **Index Scan**, providing near-instantaneous response times regardless of how large the overall table grows.
+### Query: Find all students who got a placement notification in the last 7 days
+```sql
+SELECT DISTINCT studentID 
+FROM notifications 
+WHERE notificationType = 'Placement' 
+  AND createdAt >= NOW() - INTERVAL '7 days';
+```
+*(Note: To optimize this query, an index on `(notificationType, createdAt)` would be highly beneficial).*
