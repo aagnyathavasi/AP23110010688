@@ -15,7 +15,7 @@ async function Log(stack, level, pkg, message) {
         stack: stack,
         level: level,
         package: pkg,
-        message: message
+        message: message.length > 48 ? message.substring(0, 45) + '...' : message
     };
 
     console.log(`[${level.toUpperCase()}] [${pkg}] ${message}`);
@@ -29,7 +29,7 @@ async function Log(stack, level, pkg, message) {
             }
         });
     } catch (error) {
-        console.error("[LOGGER ERROR] Failed to send log to Test Server.");
+        console.error("[LOGGER ERROR] Failed to send log to Test Server:", error.response ? error.response.data : error.message);
     }
 }
 
