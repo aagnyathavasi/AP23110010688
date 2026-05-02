@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { logger, loggingMiddleware } = require('./logger');
+const { logger, loggingMiddleware } = require('../logging_middleware/logger');
 
 const app = express();
 app.use(express.json());
