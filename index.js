@@ -1,7 +1,26 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { logger, loggingMiddleware } = require('./logger');
+const fs = require('fs');
+const path = require('path');
+
+const logFilePath = path.join(__dirname, 'logs.txt');
+
+const logger = {
+    info: (message, meta = {}) => {
+        const logEntry = JSON.stringify({ timestamp: new Date().toISOString(), level: 'INFO', message, ...meta }) + '\n';
+        fs.appendFileSync(logFilePath, logEntry);
+    },
+    error: (message, meta = {}) => {
+        const logEntry = JSON.stringify({ timestamp: new Date().toISOString(), level: 'ERROR', message, ...meta }) + '\n';
+        fs.appendFileSync(logFilePath, logEntry);
+    }
+};
+
+const loggingMiddleware = (req, res, next) => {
+    logger.info(`Incoming request: ${req.method} ${req.url}`);
+    next();
+};
 
 const app = express();
 app.use(express.json());
@@ -9,22 +28,19 @@ app.use(loggingMiddleware);
 
 const API_BASE_URL = 'http://20.207.122.201/evaluation-service';
 
-// The assignment says the API is a protected route. 
-// Assume EVALUATION_TOKEN is provided in environment variables, or pass Authorization header directly to this service.
 const getAuthHeaders = (req) => {
     const token = req.headers.authorization || process.env.EVALUATION_TOKEN;
     return token ? { Authorization: token } : {};
 };
 
 /**
- * 0/1 Knapsack Algorithm to maximize Impact within MechanicHours budget.
  * @param {number} capacity - The MechanicHours available
  * @param {Array} vehicles - Array of vehicle tasks
  * @returns {Object} - The max impact and subset of vehicles to service
  */
 function scheduleVehicles(capacity, vehicles) {
     const n = vehicles.length;
-    // DP table: dp[i][w] stores the max impact for first i items and capacity w
+    
     const dp = Array(n + 1).fill().map(() => Array(capacity + 1).fill(0));
 
     for (let i = 1; i <= n; i++) {
@@ -41,17 +57,17 @@ function scheduleVehicles(capacity, vehicles) {
         }
     }
 
-    // Backtrack to find the selected vehicles
+   
     let res = dp[n][capacity];
     let w = capacity;
     const selectedVehicles = [];
 
     for (let i = n; i > 0 && res > 0; i--) {
-        // If the value came from the previous row, item i was not included
+        
         if (res !== dp[i - 1][w]) {
             const vehicle = vehicles[i - 1];
             selectedVehicles.push(vehicle);
-            // Deduct the value and weight of the included item
+           
             res -= vehicle.Impact;
             w -= vehicle.Duration;
         }
@@ -63,13 +79,13 @@ function scheduleVehicles(capacity, vehicles) {
     };
 }
 
-// Microservice endpoint to run the scheduling algorithm
+
 app.post('/api/schedule', async (req, res) => {
     try {
         logger.info('Fetching depots and vehicles data from evaluation-service...');
         const headers = getAuthHeaders(req);
 
-        // Fetch depots and vehicles concurrently
+        
         const [depotsRes, vehiclesRes] = await Promise.all([
             axios.get(`${API_BASE_URL}/depots`, { headers }),
             axios.get(`${API_BASE_URL}/vehicles`, { headers })
@@ -80,7 +96,7 @@ app.post('/api/schedule', async (req, res) => {
 
         logger.info(`Successfully fetched ${depots.length} depots and ${vehicles.length} vehicles.`);
 
-        // Determine schedule for each depot
+     
         const results = depots.map(depot => {
             const schedulingResult = scheduleVehicles(depot.MechanicHours, vehicles);
             return {
@@ -101,7 +117,7 @@ app.post('/api/schedule', async (req, res) => {
     } catch (error) {
         logger.error('Error in vehicle scheduling', { error: error.message });
         
-        // Handle cases where the upstream API requires auth and we don't have a valid token
+        
         if (error.response && error.response.status === 401) {
              return res.status(401).json({
                  status: 'error',
