@@ -1,22 +1,52 @@
-const fs = require('fs');
-const path = require('path');
+const axios = require('axios');
 
-const logFilePath = path.join(__dirname, 'logs.txt');
+// Fallback to a presumed log endpoint if not explicitly provided
+const LOG_API_URL = process.env.LOG_API_URL || 'http://20.207.122.201/evaluation-service/log';
+const TOKEN = process.env.EVALUATION_TOKEN || '';
+
+/**
+ * Reusable Log function that makes an API call to the Test Server
+ * @param {string} stack - Stack trace or context
+ * @param {string} level - Log level (e.g., 'INFO', 'ERROR', 'WARN', 'DEBUG')
+ * @param {string} pkg - Package or module name
+ * @param {string} message - The actual log message
+ */
+async function Log(stack, level, pkg, message) {
+    const payload = {
+        stack: stack,
+        level: level,
+        package: pkg,
+        message: message
+    };
+
+    // Always log locally to console
+    console.log(`[${level}] [${pkg}] ${message}`);
+
+    try {
+        if (!TOKEN) return; // Skip API call if token is missing
+        await axios.post(LOG_API_URL, payload, {
+            headers: {
+                'Authorization': TOKEN,
+                'Content-Type': 'application/json'
+            }
+        });
+    } catch (error) {
+        console.error("[LOGGER ERROR] Failed to send log to Test Server.");
+    }
+}
 
 const logger = {
-    info: (message, meta = {}) => {
-        const logEntry = JSON.stringify({ timestamp: new Date().toISOString(), level: 'INFO', message, ...meta }) + '\n';
-        fs.appendFileSync(logFilePath, logEntry);
+    info: (message, pkg = "vehicle_maintence_scheduler", stack = "N/A") => {
+        Log(stack, 'INFO', pkg, message);
     },
-    error: (message, meta = {}) => {
-        const logEntry = JSON.stringify({ timestamp: new Date().toISOString(), level: 'ERROR', message, ...meta }) + '\n';
-        fs.appendFileSync(logFilePath, logEntry);
+    error: (message, pkg = "vehicle_maintence_scheduler", stack = "N/A") => {
+        Log(stack, 'ERROR', pkg, message);
     }
 };
 
 const loggingMiddleware = (req, res, next) => {
-    logger.info(`Incoming request: ${req.method} ${req.url}`);
+    Log("ExpressMiddleware", "INFO", "logging_middleware", `Incoming request: ${req.method} ${req.url}`);
     next();
 };
 
-module.exports = { logger, loggingMiddleware };
+module.exports = { Log, logger, loggingMiddleware };
