@@ -224,3 +224,34 @@ WHERE notificationType = 'Placement'
   AND createdAt >= NOW() - INTERVAL '7 days';
 ```
 *(Note: To optimize this query, an index on `(notificationType, createdAt)` would be highly beneficial).*
+
+# Stage 4
+
+The problem describes a classic "read-heavy" system where database read operations are overwhelming the primary database due to frequent page loads by a large number of students.
+
+To improve performance and stop overwhelming the database, I suggest the following strategies:
+
+### 1. Implement a Caching Layer (Redis / Memcached)
+Instead of hitting the PostgreSQL database on every page load, we should cache the user's recent/unread notifications in a fast, in-memory data store like Redis.
+*   **How it improves performance:** Redis operates in RAM, serving reads in sub-millisecond times. It completely bypasses the disk-backed relational database for the vast majority of notification fetches.
+*   **Tradeoffs:**
+    *   *Pros:* Massive reduction in DB load; extremely fast read latency.
+    *   *Cons:* **Cache Invalidation Complexity:** We must meticulously ensure the cache is updated or invalidated whenever a new notification is generated or an existing one is marked as read. If not handled perfectly, users will see stale data. Added infrastructure cost.
+
+### 2. Real-time Push via WebSockets (instead of Pull/Polling)
+Instead of the client fetching (pulling) notifications via an HTTP request on every single page load, the server pushes new notifications to the client over a persistent WebSocket connection. Assuming a Single Page Application (SPA) architecture, the notifications can be kept in the frontend state without refetching on route changes.
+*   **How it improves performance:** Eliminates redundant HTTP requests to fetch the exact same unread notifications on every page transition.
+*   **Tradeoffs:**
+    *   *Pros:* Real-time delivery; significantly fewer HTTP requests; drastically reduced DB reads.
+    *   *Cons:* Maintaining thousands of active, concurrent WebSocket connections consumes server memory. Requires robust handling of connection drops, reconnection logic, and load balancers configured for long-lived connections.
+
+### 3. Database Read Replicas
+We can route all "read" queries (fetching notifications) to Read Replicas, while keeping "write" operations (creating/marking read) on the Primary database instance.
+*   **How it improves performance:** Horizontally distributes the read query load across multiple database servers rather than funneling all traffic to a single bottleneck instance.
+*   **Tradeoffs:**
+    *   *Pros:* Easy to scale out at the infrastructure level; doesn't require massive application code changes.
+    *   *Cons:* **Replication Lag:** Read replicas are eventually consistent. A student might mark a notification as read (write to Primary), immediately reload the page (read from Replica), and briefly still see the notification as unread if the replication hasn't caught up yet.
+
+### Recommended Approach
+A combination of **Strategy 1 (Caching)** and **Strategy 2 (WebSockets)** is the industry standard for this scenario. We use Redis to cache the notification payload for ultra-fast initial loads upon login, and WebSockets to push new live notifications so clients don't need to repeatedly hit the backend to check for updates.
+
