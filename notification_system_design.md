@@ -319,3 +319,28 @@ function consume_push_queue(event):
     except Exception:
         MessageQueue.retry_with_backoff(event)
 ```
+
+# Stage 6
+
+## Priority Inbox Approach
+
+To efficiently maintain the top `N` (e.g., 10) most important notifications as new ones continuously stream in, we must avoid sorting the entire list every time a new notification arrives. Sorting the full list would take `O(M log M)` where `M` is the ever-growing total number of notifications. 
+
+Instead, the optimal data structure for this problem is a **Min-Heap (Priority Queue)** constrained to a maximum size of `N`.
+
+### How it works:
+1.  **Priority Calculation:** Priority is determined first by `Weight` (`Placement` = 3, `Result` = 2, `Event` = 1). If weights are equal, we break ties using `Recency` (Unix timestamp). Higher weight and newer timestamp mean higher priority.
+2.  **The Min-Heap:** We maintain a Min-Heap of exactly size `10`. In this heap, the elements are ordered such that the notification with the **lowest** priority *among the top 10* sits at the root.
+3.  **Inserting New Notifications:** 
+    *   If the heap has fewer than 10 items, we simply insert the new notification and heapify up `O(log N)`.
+    *   If the heap is full (10 items), we compare the new notification to the root (the lowest-priority item currently in our top 10).
+    *   If the new notification has a *lower* priority than the root, we immediately discard it `O(1)`.
+    *   If the new notification has a *higher* priority than the root, we replace the root with the new notification and sink it down to restore the heap property `O(log N)`.
+
+### Why this is highly efficient:
+*   **Space Complexity:** `O(N)` where N is 10. We only ever store 10 items in memory regardless of how many millions of notifications arrive.
+*   **Time Complexity:** 
+    *   Processing `M` initial notifications takes `O(M log N)`. Since `N = 10`, `log(10)` is a tiny constant, making this effectively `O(M)` linear time. 
+    *   Processing a new incoming real-time notification takes worst-case `O(log N)` (effectively `O(1)` operations) to update the top 10 list.
+
+This guarantees maximum efficiency for the Priority Inbox feature. The functioning code implementing this Min-Heap logic can be found in the `priority_inbox.js` file submitted in this repository.
