@@ -1,4 +1,4 @@
-require('dotenv').config({ path: '../.env' });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 const axios = require('axios');
 
 // IMPORTANT: Replace this URL with the actual Notification API URL from your screenshot!
