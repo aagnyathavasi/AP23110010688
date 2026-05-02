@@ -19,16 +19,16 @@ function getWeight(type) {
 
 // Returns true if 'a' has strictly HIGHER priority than 'b'
 function hasHigherPriority(a, b) {
-    const weightA = getWeight(a.notificationType || a.notification_type);
-    const weightB = getWeight(b.notificationType || b.notification_type);
+    const weightA = getWeight(a.Type);
+    const weightB = getWeight(b.Type);
     
     if (weightA !== weightB) {
         return weightA > weightB; 
     }
     
     // If weights are equal, more recent comes first
-    const timeA = new Date(a.createdAt).getTime();
-    const timeB = new Date(b.createdAt).getTime();
+    const timeA = new Date(a.Timestamp).getTime();
+    const timeB = new Date(b.Timestamp).getTime();
     return timeA > timeB;
 }
 
@@ -130,8 +130,8 @@ async function fetchAndProcessNotifications() {
         
         console.log("\n--- PRIORITY INBOX: TOP 10 NOTIFICATIONS ---");
         results.forEach((n, index) => {
-            const type = (n.notificationType || n.notification_type || 'Unknown').toUpperCase();
-            console.log(`${index + 1}. [${type}] Date: ${n.createdAt || 'N/A'} - ID: ${n.id || n.TaskID || 'N/A'}`);
+            const type = (n.Type || 'Unknown').toUpperCase();
+            console.log(`${index + 1}. [${type}] Date: ${n.Timestamp || 'N/A'} - Msg: "${n.Message || ''}" - ID: ${n.ID || 'N/A'}`);
         });
 
     } catch (error) {
