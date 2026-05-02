@@ -96,7 +96,7 @@ app.post('/api/schedule', async (req, res) => {
         });
 
     } catch (error) {
-        logger.error('Error in vehicle scheduling', { error: error.message });
+        logger.error('Error in vehicle scheduling', 'vehicle_maintence_scheduler', error.message);
         
         
         if (error.response && error.response.status === 401) {
