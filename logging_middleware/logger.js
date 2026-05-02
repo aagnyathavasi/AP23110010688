@@ -1,14 +1,13 @@
 const axios = require('axios');
 
-// Fallback to a presumed log endpoint if not explicitly provided
-const LOG_API_URL = process.env.LOG_API_URL || 'http://20.207.122.201/evaluation-service/log';
+const LOG_API_URL = process.env.LOG_API_URL || 'http://20.207.122.201/evaluation-service/logs';
 const TOKEN = process.env.EVALUATION_TOKEN || '';
 
 /**
  * Reusable Log function that makes an API call to the Test Server
- * @param {string} stack - Stack trace or context
- * @param {string} level - Log level (e.g., 'INFO', 'ERROR', 'WARN', 'DEBUG')
- * @param {string} pkg - Package or module name
+ * @param {string} stack - 'backend' or 'frontend'
+ * @param {string} level - 'debug', 'info', 'warn', 'error', 'fatal'
+ * @param {string} pkg - 'service', 'middleware', 'controller', etc.
  * @param {string} message - The actual log message
  */
 async function Log(stack, level, pkg, message) {
@@ -19,11 +18,10 @@ async function Log(stack, level, pkg, message) {
         message: message
     };
 
-    // Always log locally to console
-    console.log(`[${level}] [${pkg}] ${message}`);
+    console.log(`[${level.toUpperCase()}] [${pkg}] ${message}`);
 
     try {
-        if (!TOKEN) return; // Skip API call if token is missing
+        if (!TOKEN) return; 
         await axios.post(LOG_API_URL, payload, {
             headers: {
                 'Authorization': TOKEN,
@@ -36,16 +34,16 @@ async function Log(stack, level, pkg, message) {
 }
 
 const logger = {
-    info: (message, pkg = "vehicle_maintence_scheduler", stack = "N/A") => {
-        Log(stack, 'INFO', pkg, message);
+    info: (message, pkg = "service", stack = "backend") => {
+        Log(stack, 'info', pkg, message);
     },
-    error: (message, pkg = "vehicle_maintence_scheduler", stack = "N/A") => {
-        Log(stack, 'ERROR', pkg, message);
+    error: (message, pkg = "service", stack = "backend") => {
+        Log(stack, 'error', pkg, message);
     }
 };
 
 const loggingMiddleware = (req, res, next) => {
-    Log("ExpressMiddleware", "INFO", "logging_middleware", `Incoming request: ${req.method} ${req.url}`);
+    Log("backend", "info", "middleware", `Incoming request: ${req.method} ${req.url}`);
     next();
 };
 
